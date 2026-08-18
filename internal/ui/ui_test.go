@@ -161,6 +161,32 @@ func TestRemapRejectsSamePath(t *testing.T) {
 	}
 }
 
+func TestTransferFlow(t *testing.T) {
+	m := fixtureModel(t)
+	m = send(t, m, key("e"))
+	if m.mode != modeTransferPick || m.xferSrc == nil {
+		t.Fatalf("export not entered: mode=%v", m.mode)
+	}
+	if !strings.Contains(m.View(), "export") || !strings.Contains(m.View(), "migrate") {
+		t.Fatalf("pick view missing options:\n%s", m.View())
+	}
+	m = send(t, m, key("c"))
+	if m.mode != modeTransferTarget || m.xferMode != agents.TransferExport {
+		t.Fatalf("target not entered: mode=%v modeStr=%s", m.mode, m.xferMode)
+	}
+	if len(m.xferTargets) == 0 {
+		t.Fatal("no targets")
+	}
+	m = send(t, m, key("esc"))
+	if m.mode != modeTransferPick {
+		t.Fatalf("esc should return to pick, mode=%v", m.mode)
+	}
+	m = send(t, m, key("esc"))
+	if m.mode != modeList || m.xferSrc != nil {
+		t.Fatal("esc should cancel transfer")
+	}
+}
+
 func TestRenameFlow(t *testing.T) {
 	m := fixtureModel(t)
 	m = send(t, m, key("n"))

@@ -38,6 +38,9 @@ func main() {
 		case "rename":
 			runRename(rest[1:], opts)
 			return
+		case "export":
+			runExport(rest[1:], opts)
+			return
 		case "config":
 			runConfig(rest[1:])
 			return
@@ -110,6 +113,8 @@ Usage:
                                     (--agent --from --to [--yes] [--store])
   agents-session-manager rename     change a session title/name
                                     (--agent --to [--id|--name|--session] [--store] [--yes])
+  agents-session-manager export     copy a session to another agent
+                                    (--from --to [--id|--name|--session] [--move] [--yes])
   agents-session-manager config     list/add/remove extra agent home dirs
 
 Global (repeatable; persist with "config add-dir <agent> PATH" or TUI a):
@@ -129,6 +134,8 @@ Originals are always copied to a backup directory under
 Remap/delete/rename are refused for an agent while that agent is running.
 The TUI re-detects locks every second (press L to refresh now).
 Writes snapshot, mutate a copy, swap, then verify the on-disk delta.
+e export/migrate copies a transcript into another agent's store
+(--move archives the source after a successful copy).
 A process only locks the home dir it is actually using (env / open files).
 agy has no relocatable home.
 `)
@@ -423,6 +430,118 @@ func runRename(args []string, opts agents.DiscoverOptions) {
 	}
 	printApplyWarnings(rep)
 	fmt.Printf("✓ renamed to %q\nbackup: %s\n", plan.NewTitle, rep.BackupDir)
+}
+
+func runExport(args []string, opts agents.DiscoverOptions) {
+	fs := flag.NewFlagSet("export", flag.ExitOnError)
+	from := fs.String("from", "", "source agent (claude|codex|grok|agy|qwen|muse)")
+	to := fs.String("to", "", "target agent")
+	id := fs.String("id", "", "session GUID")
+	name := fs.String("name", "", "current session title/name")
+	session := fs.String("session", "", "GUID or current title")
+	fromStore := fs.String("from-store", "", "source storage root when multiple homes exist")
+	toStore := fs.String("to-store", "", "target storage root when multiple homes exist")
+	move := fs.Bool("move", false, "archive the source after a successful copy (migrate)")
+	yes := fs.Bool("yes", false, "apply without confirmation")
+	fs.Parse(args)
+
+	fail := func(format string, a ...any) {
+		fmt.Fprintf(os.Stderr, "error: "+format+"\n", a...)
+		os.Exit(1)
+	}
+	if *from == "" || *to == "" {
+		fail("--from and --to are required")
+	}
+	sel := strings.TrimSpace(*session)
+	if sel == "" {
+		sel = strings.TrimSpace(*id)
+	}
+	if sel == "" {
+		sel = strings.TrimSpace(*name)
+	}
+	if sel == "" {
+		fail("pass --id, --name, or --session")
+	}
+
+	as := agents.DiscoverWith(opts)
+	src, err := pickAgent(as, *from, *fromStore)
+	if err != nil {
+		fail("%v", err)
+	}
+	dst, err := pickAgent(as, *to, *toStore)
+	if err != nil {
+		fail("%v", err)
+	}
+
+	mode := agents.TransferExport
+	if *move {
+		mode = agents.TransferMigrate
+	}
+	if err := agents.ProbeUnlocked([]agents.Agent{src, dst}); err != nil {
+		fail("%s", err)
+	}
+
+	ss, errs := agents.ScanAll(context.Background(), []agents.Agent{src})
+	for kind, e := range errs {
+		fmt.Fprintf(os.Stderr, "scan warning: %s: %v\n", kind, e)
+	}
+	found, err := findSession(ss, sel)
+	if err != nil {
+		fail("%v", err)
+	}
+	plan, err := agents.TransferPlan(src, dst, found, mode)
+	if err != nil {
+		fail("%v", err)
+	}
+	fmt.Printf("%s %s %s\n  → %s %s\n", mode, found.Kind, found.ID, plan.ToKind, plan.NewID)
+	for _, a := range plan.Actions {
+		fmt.Printf("  - %s\n", a.Desc)
+	}
+	if !*yes {
+		fmt.Print("Apply? [y/N] ")
+		var answer string
+		fmt.Scanln(&answer)
+		if answer != "y" && answer != "Y" {
+			fmt.Println("aborted")
+			return
+		}
+	}
+	if err := agents.ProbeUnlocked([]agents.Agent{src, dst}); err != nil {
+		fail("%s", err)
+	}
+	rep, err := migrate.ApplyWith(plan, backupRoot(), func() error {
+		return agents.ProbeUnlocked([]agents.Agent{src, dst})
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed: %v\nbackup: %s\n", err, rep.BackupDir)
+		os.Exit(1)
+	}
+	printApplyWarnings(rep)
+	if mode == agents.TransferMigrate {
+		fmt.Printf("✓ migrated to %s %s\nbackup: %s\n", plan.ToKind, plan.NewID, rep.BackupDir)
+	} else {
+		fmt.Printf("✓ exported to %s %s\nbackup: %s\n", plan.ToKind, plan.NewID, rep.BackupDir)
+	}
+}
+
+func pickAgent(as []agents.Agent, name, store string) (agents.Agent, error) {
+	var matches []agents.Agent
+	for _, a := range as {
+		if string(a.Kind()) != name {
+			continue
+		}
+		if store != "" && !agents.SamePath(a.Root(), store) {
+			continue
+		}
+		matches = append(matches, a)
+	}
+	if len(matches) == 0 {
+		return nil, fmt.Errorf("agent %q not found", name)
+	}
+	if len(matches) > 1 {
+		return nil, fmt.Errorf("multiple %s stores; pass --from-store/--to-store (%s)", name, joinRoots(matches))
+	}
+	return matches[0], nil
 }
 
 func findSession(ss []model.Session, sel string) (model.Session, error) {

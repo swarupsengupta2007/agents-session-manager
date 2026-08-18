@@ -81,7 +81,7 @@ func applyAction(a Action, backupDir string, probe ProbeFunc) ([]string, error) 
 			}
 			return os.WriteFile(work, []byte(a.New), 0o644)
 		})
-	case SQLiteSetCwd, SQLiteDelete, SQLiteSetWorkspace, SQLiteMuseRename:
+	case SQLiteSetCwd, SQLiteDelete, SQLiteSetWorkspace, SQLiteMuseRename, SQLiteJSONUpsert:
 		return applySQLite(a, backupDir, probe)
 	case MoveFile:
 		return applyMove(a.Src, a.Dst, backupDir, probe, false)

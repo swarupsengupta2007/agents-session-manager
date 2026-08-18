@@ -81,6 +81,7 @@ Keys:
 | `enter` / `d` | session detail pane |
 | `m` | remap: applies to **all** sessions sharing the selected session's project path |
 | `n` | rename the selected session (display title / session name; the GUID stays put) |
+| `e` | export or migrate the selected session to another agent |
 | `x` | delete (soft: artifacts are archived to the backup dir) |
 | `r` | resume handoff: suspends the TUI and runs `claude --resume <id>` / `codex resume <id>` / `grok --resume <id>` / `agy --conversation <id>` / `qwen --resume <id>` / `muse resume <id>` in the session's project dir |
 | `a` | add an extra Claude `CONFIG_DIR` (persisted) |
@@ -93,6 +94,13 @@ a **preview of every planned action** is shown → `y` applies it.
 
 Rename flow: select a session → `n` → edit the title (prefilled) → enter
 applies it. Lookup on the CLI is by GUID or by the current title.
+
+Export / migrate: select a session → `e` → `c` to **export** (copy) or
+`m` to **migrate** (copy, then archive the source) → pick the target
+agent → preview → `y`. The copy gets a new UUID. Turns are converted to
+the target's native transcript so this tool (and the target CLI, when it
+scans the same files) can list them. Agy conversation bodies are
+protobuf, so an export from agy carries the title only.
 
 ### Headless
 
@@ -107,6 +115,10 @@ applies it. Lookup on the CLI is by GUID or by the current title.
 ./agents-session-manager rename --agent claude --id 0664494f-279a-4d7d-a398-2c83039d6885 --to "Widget v2" --yes
 ./agents-session-manager rename --agent grok --name "Fix the frobnicator" --to "Frobnicator v2"
 ./agents-session-manager rename --agent muse --session "update" --to "Ship it" --yes
+
+# copy a session into another agent (add --move to archive the source)
+./agents-session-manager export --from claude --to grok --id 0664494f-279a-4d7d-a398-2c83039d6885 --yes
+./agents-session-manager export --from qwen --to claude --name "hi from qwen" --move --yes
 ```
 
 `remap` and `rename` print the plan and ask for confirmation unless `--yes`

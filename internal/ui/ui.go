@@ -29,6 +29,9 @@ const (
 	modeDeleteConfirm
 	modeAddStore
 	modeRenameInput
+	modeTransferPick
+	modeTransferTarget
+	modeTransferPreview
 )
 
 type sessionsLoadedMsg struct {
@@ -95,6 +98,12 @@ type Model struct {
 	deleteTarget *model.Session
 	renameTarget *model.Session
 
+	xferSrc     *model.Session
+	xferMode    string // export | migrate
+	xferTargets []int  // indexes into m.agents
+	xferDstIdx  int    // index into xferTargets
+	xferPlan    *migrate.Plan
+
 	applying bool
 	spinner  spinner.Model
 
@@ -154,9 +163,13 @@ func (m Model) scanCmd() tea.Cmd {
 }
 
 func applyCmd(plan *migrate.Plan, backupRoot string, as []agents.Agent) tea.Cmd {
+	want := map[string]bool{plan.Agent: true}
+	for _, k := range plan.LockKinds {
+		want[k] = true
+	}
 	var watch []agents.Agent
 	for _, a := range as {
-		if string(a.Kind()) == plan.Agent {
+		if want[string(a.Kind())] {
 			watch = append(watch, a)
 		}
 	}
@@ -316,7 +329,13 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.errMsg = msg.err.Error()
 			return m, detectLocksCmd(m.agents, false)
 		}
-		if msg.plan.NewTitle != "" {
+		if msg.plan.Transfer == agents.TransferExport {
+			m.status = fmt.Sprintf("✓ exported %s → %s as %s · backup: %s",
+				msg.plan.FromKind, msg.plan.ToKind, msg.plan.NewID, msg.report.BackupDir)
+		} else if msg.plan.Transfer == agents.TransferMigrate {
+			m.status = fmt.Sprintf("✓ migrated %s → %s as %s (source archived) · backup: %s",
+				msg.plan.FromKind, msg.plan.ToKind, msg.plan.NewID, msg.report.BackupDir)
+		} else if msg.plan.NewTitle != "" {
 			m.status = fmt.Sprintf("✓ renamed to %q · backup: %s", msg.plan.NewTitle, msg.report.BackupDir)
 		} else if msg.plan.NewCwd != "" {
 			n := 0
@@ -341,6 +360,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.remapGroup = nil
 		m.deleteTarget = nil
 		m.renameTarget = nil
+		m.xferSrc = nil
+		m.xferPlan = nil
+		m.xferTargets = nil
 		if s := m.selected(); s != nil {
 			m.focusKey = &sessionKey{s.Kind, s.ID, s.Store}
 		}
@@ -403,6 +425,12 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateAddStore(key)
 	case modeRenameInput:
 		return m.updateRenameInput(key)
+	case modeTransferPick:
+		return m.updateTransferPick(key)
+	case modeTransferTarget:
+		return m.updateTransferTarget(key)
+	case modeTransferPreview:
+		return m.updateTransferPreview(key)
 	default:
 		return m.updateList(key)
 	}
@@ -488,6 +516,8 @@ func (m Model) updateList(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.startDelete()
 	case "n":
 		return m.startRename()
+	case "e":
+		return m.startTransfer()
 	case "r":
 		return m.startResume()
 	case "a":
@@ -791,6 +821,159 @@ func (m Model) updateRenameInput(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(key)
 	return m, cmd
+}
+
+func (m Model) startTransfer() (tea.Model, tea.Cmd) {
+	s := m.selected()
+	if s == nil {
+		return m, nil
+	}
+	if msg := m.lockRefuse(*s, "export"); msg != "" {
+		m.errMsg = msg
+		return m, nil
+	}
+	cp := *s
+	m.xferSrc = &cp
+	m.xferMode = ""
+	m.xferPlan = nil
+	m.xferTargets = nil
+	m.mode = modeTransferPick
+	m.errMsg = ""
+	return m, nil
+}
+
+func (m Model) clearTransfer() Model {
+	m.mode = modeList
+	m.xferSrc = nil
+	m.xferMode = ""
+	m.xferPlan = nil
+	m.xferTargets = nil
+	m.xferDstIdx = 0
+	return m
+}
+
+func (m Model) updateTransferPick(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch key.String() {
+	case "esc", "q":
+		return m.clearTransfer(), nil
+	case "c", "e", "1":
+		return m.enterTransferTarget(agents.TransferExport)
+	case "m", "2":
+		return m.enterTransferTarget(agents.TransferMigrate)
+	}
+	return m, nil
+}
+
+func (m Model) enterTransferTarget(mode string) (tea.Model, tea.Cmd) {
+	src, ok := m.agentFor(*m.xferSrc)
+	if !ok {
+		m.errMsg = "no agent adapter for " + string(m.xferSrc.Kind)
+		return m.clearTransfer(), nil
+	}
+	var targets []int
+	for i, a := range m.agents {
+		if mode == agents.TransferMigrate && a.Kind() == src.Kind() && agents.SamePath(a.Root(), src.Root()) {
+			continue
+		}
+		targets = append(targets, i)
+	}
+	if len(targets) == 0 {
+		m.errMsg = "no target agent available"
+		return m.clearTransfer(), nil
+	}
+	m.xferMode = mode
+	m.xferTargets = targets
+	m.xferDstIdx = 0
+	m.mode = modeTransferTarget
+	m.errMsg = ""
+	return m, nil
+}
+
+func (m Model) updateTransferTarget(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch key.String() {
+	case "esc":
+		m.mode = modeTransferPick
+		m.xferTargets = nil
+		return m, nil
+	case "up", "k":
+		if m.xferDstIdx > 0 {
+			m.xferDstIdx--
+		}
+	case "down", "j":
+		if m.xferDstIdx+1 < len(m.xferTargets) {
+			m.xferDstIdx++
+		}
+	case "enter":
+		return m.buildTransferPreview()
+	}
+	return m, nil
+}
+
+func (m Model) buildTransferPreview() (tea.Model, tea.Cmd) {
+	if m.xferSrc == nil || m.xferDstIdx < 0 || m.xferDstIdx >= len(m.xferTargets) {
+		return m, nil
+	}
+	src, ok := m.agentFor(*m.xferSrc)
+	if !ok {
+		m.errMsg = "no source agent adapter"
+		return m.clearTransfer(), nil
+	}
+	dst := m.agents[m.xferTargets[m.xferDstIdx]]
+	if msg := m.lockRefuseAgent(dst, m.xferMode); msg != "" {
+		m.errMsg = msg
+		return m, nil
+	}
+	if m.xferMode == agents.TransferMigrate {
+		if msg := m.lockRefuse(*m.xferSrc, "migrate"); msg != "" {
+			m.errMsg = msg
+			return m, nil
+		}
+	}
+	plan, err := agents.TransferPlan(src, dst, *m.xferSrc, m.xferMode)
+	if err != nil {
+		m.errMsg = err.Error()
+		return m, nil
+	}
+	m.xferPlan = plan
+	m.mode = modeTransferPreview
+	return m, nil
+}
+
+func (m Model) lockRefuseAgent(a agents.Agent, verb string) string {
+	l, ok := m.lockForAgent(a)
+	if !ok {
+		return ""
+	}
+	return fmt.Sprintf("%s; cannot %s into its store while it can write them",
+		agents.FormatLocks([]agents.Lock{l}), verb)
+}
+
+func (m Model) updateTransferPreview(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch key.String() {
+	case "esc", "n", "q":
+		m.mode = modeTransferTarget
+		m.xferPlan = nil
+		return m, nil
+	case "y", "enter":
+		if m.xferPlan == nil {
+			return m, nil
+		}
+		if src, ok := m.agentFor(*m.xferSrc); ok {
+			if msg := m.lockRefuseAgent(src, m.xferMode); msg != "" && m.xferMode == agents.TransferMigrate {
+				m.errMsg = msg
+				return m, nil
+			}
+		}
+		dst := m.agents[m.xferTargets[m.xferDstIdx]]
+		if msg := m.lockRefuseAgent(dst, m.xferMode); msg != "" {
+			m.errMsg = msg
+			return m, nil
+		}
+		m.applying = true
+		m.errMsg = ""
+		return m, tea.Batch(applyCmd(m.xferPlan, m.backupRoot, m.agents), m.spinner.Tick)
+	}
+	return m, nil
 }
 
 func (m Model) startAddStore() (tea.Model, tea.Cmd) {

@@ -139,6 +139,15 @@ func (m Model) renderFilterBar() string {
 }
 
 func (m Model) renderBody() string {
+	if m.mode == modeTransferPick {
+		return m.renderTransferPick()
+	}
+	if m.mode == modeTransferTarget {
+		return m.renderTransferTarget()
+	}
+	if m.mode == modeTransferPreview && m.xferPlan != nil {
+		return m.renderPlanPreview()
+	}
 	if m.mode == modeRemapPreview && m.remapPlan != nil {
 		return m.renderPlanPreview()
 	}
@@ -315,12 +324,59 @@ func (m Model) renderDetail(s model.Session, width int) string {
 	return boxStyle.Width(width - 2).Render(strings.Join(lines, "\n"))
 }
 
+func (m Model) renderTransferPick() string {
+	s := m.xferSrc
+	title := s.Title
+	if title == "" {
+		title = s.ID
+	}
+	var b strings.Builder
+	b.WriteString(headerStyle.Render("Export or migrate session"))
+	b.WriteString("\n\n")
+	b.WriteString(fmt.Sprintf("  %s  %s\n", s.Kind, title))
+	b.WriteString("  " + dimStyle.Render(s.Cwd) + "\n\n")
+	b.WriteString("  " + activeStyle.Render("c") + "  export  — copy the transcript to another agent\n")
+	b.WriteString("  " + activeStyle.Render("m") + "  migrate — copy, then archive the source session\n")
+	return b.String()
+}
+
+func (m Model) renderTransferTarget() string {
+	var b strings.Builder
+	verb := "Export to"
+	if m.xferMode == agents.TransferMigrate {
+		verb = "Migrate to"
+	}
+	b.WriteString(headerStyle.Render(verb + " which agent?"))
+	b.WriteString("\n\n")
+	for i, ai := range m.xferTargets {
+		a := m.agents[ai]
+		label := "  " + agents.AgentLabel(a) + "  " + dimStyle.Render(a.Root())
+		if i == m.xferDstIdx {
+			label = activeStyle.Render("> "+agents.AgentLabel(a)) + "  " + dimStyle.Render(a.Root())
+		}
+		b.WriteString(label + "\n")
+	}
+	return b.String()
+}
+
 func (m Model) renderPlanPreview() string {
 	p := m.remapPlan
+	if m.mode == modeTransferPreview && m.xferPlan != nil {
+		p = m.xferPlan
+	}
 	var b strings.Builder
-	b.WriteString(headerStyle.Render(fmt.Sprintf("Migration plan — %s", p.Agent)))
-	b.WriteString("\n")
-	b.WriteString(fmt.Sprintf("  %s  →  %s\n", boldPath(p.OldCwd), boldPath(p.NewCwd)))
+	if p.Transfer != "" {
+		b.WriteString(headerStyle.Render(fmt.Sprintf("%s plan — %s → %s", p.Transfer, p.FromKind, p.ToKind)))
+		b.WriteString("\n")
+		b.WriteString(fmt.Sprintf("  new session id  %s\n", p.NewID))
+		if p.NewTitle != "" {
+			b.WriteString(fmt.Sprintf("  title           %s\n", p.NewTitle))
+		}
+	} else {
+		b.WriteString(headerStyle.Render(fmt.Sprintf("Migration plan — %s", p.Agent)))
+		b.WriteString("\n")
+		b.WriteString(fmt.Sprintf("  %s  →  %s\n", boldPath(p.OldCwd), boldPath(p.NewCwd)))
+	}
 	b.WriteString(dimStyle.Render(fmt.Sprintf("  originals will be copied to %s before any change", m.backupRoot)))
 	b.WriteString("\n\n")
 	max := m.pageSize() - 5
@@ -342,6 +398,14 @@ func (m Model) renderStatus() string {
 	switch {
 	case m.applying:
 		return m.spinner.View() + " applying migration…"
+	case m.mode == modeTransferPick:
+		return "c export (copy) · m migrate (move) · esc cancel"
+	case m.mode == modeTransferTarget:
+		return "↑/↓ choose target agent · enter preview · esc back"
+	case m.mode == modeTransferPreview:
+		return fmt.Sprintf("%s %s → %s as %s — %d actions. %s to apply, %s to cancel.",
+			m.xferMode, m.xferPlan.FromKind, m.xferPlan.ToKind, truncate(m.xferPlan.NewID, 13),
+			len(m.xferPlan.Actions), activeStyle.Render("y"), dimStyle.Render("esc"))
 	case m.mode == modeRenameInput:
 		s := m.renameTarget
 		cur := s.Title
@@ -393,8 +457,14 @@ func (m Model) footerKeys() string {
 		return "enter save · esc cancel"
 	case modeRenameInput:
 		return "enter save · esc cancel"
+	case modeTransferPick:
+		return "c export · m migrate · esc cancel"
+	case modeTransferTarget:
+		return "↑/↓ target · enter preview · esc back"
+	case modeTransferPreview:
+		return "y apply · esc back"
 	default:
-		return "↑/↓ move · enter detail · m remap · n rename · x delete · r resume · a extra-dir · / search · tab/S-tab agent · o orphans · L locks · R refresh · q quit"
+		return "↑/↓ move · enter detail · m remap · e export/migrate · n rename · x delete · r resume · a extra-dir · / search · tab/S-tab agent · o orphans · L locks · R refresh · q quit"
 	}
 }
 

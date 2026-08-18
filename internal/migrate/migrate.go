@@ -36,6 +36,7 @@ const (
 	AppendJSONL        // append New as one JSONL line to Src
 	SQLiteMuseRename   // sessions.title + session_name + increment session_name_revision
 	WriteFile          // write New to Dst (or Src if Dst empty)
+	SQLiteJSONUpsert   // INSERT or UPDATE columns from JSON object New, keyed by SessionID
 )
 
 // Action is one atomic, describable mutation.
@@ -57,6 +58,11 @@ type Plan struct {
 	Agent          string
 	OldCwd, NewCwd string
 	NewTitle       string // set by rename plans
+	Transfer       string // export | migrate (empty for remap/delete/rename)
+	FromKind       string
+	ToKind         string
+	NewID          string
+	LockKinds      []string // kinds to probe; defaults to Agent
 	Actions        []Action
 }
 
@@ -169,7 +175,58 @@ func sqliteMutate(a Action) error {
 		err = sqliteSetWorkspace(db, a.SessionID, a.Old, a.New)
 	case SQLiteMuseRename:
 		err = sqliteMuseRename(db, table, col, a.New, a.SessionID)
+	case SQLiteJSONUpsert:
+		err = sqliteJSONUpsert(db, table, col, a.SessionID, a.New)
 	}
+	return err
+}
+
+func sqliteJSONUpsert(db *sql.DB, table, keyCol, key, raw string) error {
+	var cols map[string]any
+	if err := json.Unmarshal([]byte(raw), &cols); err != nil {
+		return err
+	}
+	if key != "" {
+		cols[keyCol] = key
+	}
+	names := make([]string, 0, len(cols))
+	for n := range cols {
+		id, err := sqlIdent(n, "")
+		if err != nil {
+			return err
+		}
+		names = append(names, id)
+	}
+	if len(names) == 0 {
+		return fmt.Errorf("no columns to upsert")
+	}
+	setParts := make([]string, 0, len(names))
+	setArgs := make([]any, 0, len(names))
+	for _, n := range names {
+		if n == keyCol {
+			continue
+		}
+		setParts = append(setParts, n+` = ?`)
+		setArgs = append(setArgs, cols[n])
+	}
+	if len(setParts) > 0 {
+		res, err := db.Exec(`UPDATE `+table+` SET `+strings.Join(setParts, ", ")+` WHERE `+keyCol+` = ?`,
+			append(setArgs, key)...)
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n > 0 {
+			return nil
+		}
+	}
+	ph := make([]string, len(names))
+	insArgs := make([]any, len(names))
+	for i, n := range names {
+		ph[i] = "?"
+		insArgs[i] = cols[n]
+	}
+	_, err := db.Exec(`INSERT INTO `+table+` (`+strings.Join(names, ", ")+`) VALUES (`+strings.Join(ph, ", ")+`)`,
+		insArgs...)
 	return err
 }
 
