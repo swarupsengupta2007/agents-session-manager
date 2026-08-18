@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 # Build agents-session-manager for the host, or cross-compile.
-# Usage: ./build.sh [native|linux|windows|all]
+# Usage: ./build.sh [native|linux|windows|macos|all]
 set -eu
 cd "$(dirname "$0")"
 
@@ -33,21 +33,28 @@ linux)
 windows)
 	build_one windows amd64
 	;;
+macos|darwin|mac)
+	build_one darwin arm64
+	build_one darwin amd64
+	;;
 all)
 	build_one linux amd64
 	build_one windows amd64
+	build_one darwin arm64
+	build_one darwin amd64
 	;;
 -h|--help|help)
-	echo "usage: $0 [native|linux|windows|all]"
+	echo "usage: $0 [native|linux|windows|macos|all]"
 	echo "  native   host GOOS/GOARCH (default)"
 	echo "  linux    linux/amd64"
 	echo "  windows  windows/amd64"
-	echo "  all      linux/amd64 and windows/amd64"
+	echo "  macos    darwin/arm64 and darwin/amd64"
+	echo "  all      linux, windows, and macos"
 	echo "OUT=dir overrides the output root (default: dist/)"
 	exit 0
 	;;
 *)
-	echo "unknown target: $target (try native|linux|windows|all)" >&2
+	echo "unknown target: $target (try native|linux|windows|macos|all)" >&2
 	exit 2
 	;;
 esac

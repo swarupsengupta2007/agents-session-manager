@@ -29,15 +29,22 @@ no longer exists on disk.
 
 ## Build
 
-Requires Go ≥ 1.23. `modernc.org/sqlite` is pure Go, so both scripts
+Requires Go ≥ 1.23. `modernc.org/sqlite` is pure Go, so the scripts
 build with `CGO_ENABLED=0` and can cross-compile.
 
 ```sh
 # Linux / macOS / Git Bash
 ./build.sh            # host OS/arch → dist/<os>-<arch>/
-./build.sh all        # linux/amd64 and windows/amd64
+./build.sh all        # linux, windows, macos (Intel + Apple Silicon)
 ./build.sh linux
 ./build.sh windows
+./build.sh macos
+
+# macOS only (same binaries as ./build.sh macos)
+./build-macos.sh          # darwin/arm64 and darwin/amd64
+./build-macos.sh arm64    # Apple Silicon
+./build-macos.sh amd64    # Intel
+./build-macos.sh native   # this Mac's CPU
 ```
 
 ```bat
@@ -46,6 +53,7 @@ build.cmd
 build.cmd all
 build.cmd linux
 build.cmd windows
+build.cmd macos
 ```
 
 Or by hand:
@@ -204,7 +212,8 @@ actual `claude` run.
 
 ## Known limitations (v1)
 
-- Linux-first; macOS should work (same storage paths) but is untested.
+- Linux-first; macOS shares the same storage paths and has darwin
+  build targets, but the TUI is untested on a Mac.
 - Codex transcripts keep their date-based location after a remap (only
   `cwd` changes), which matches how Codex resolves sessions.
 - Grok's `events.jsonl`/`chat_history.jsonl` may mention the old path

@@ -3,7 +3,7 @@ setlocal EnableExtensions
 cd /d "%~dp0"
 
 rem Build agents-session-manager for the host, or cross-compile.
-rem Usage: build.cmd [native|linux|windows|all]
+rem Usage: build.cmd [native|linux|windows|macos|all]
 
 set "NAME=agents-session-manager"
 if not defined OUT set "OUT=dist"
@@ -17,9 +17,12 @@ if /I "%TARGET%"=="help" goto :help
 if /I "%TARGET%"=="native" goto :native
 if /I "%TARGET%"=="linux" goto :linux
 if /I "%TARGET%"=="windows" goto :windows
+if /I "%TARGET%"=="macos" goto :macos
+if /I "%TARGET%"=="darwin" goto :macos
+if /I "%TARGET%"=="mac" goto :macos
 if /I "%TARGET%"=="all" goto :all
 
-echo unknown target: %TARGET% (try native^|linux^|windows^|all) 1>&2
+echo unknown target: %TARGET% (try native^|linux^|windows^|macos^|all) 1>&2
 exit /b 2
 
 :native
@@ -36,10 +39,20 @@ exit /b %ERRORLEVEL%
 call :build windows amd64
 exit /b %ERRORLEVEL%
 
+:macos
+call :build darwin arm64
+if errorlevel 1 exit /b 1
+call :build darwin amd64
+exit /b %ERRORLEVEL%
+
 :all
 call :build linux amd64
 if errorlevel 1 exit /b 1
 call :build windows amd64
+if errorlevel 1 exit /b 1
+call :build darwin arm64
+if errorlevel 1 exit /b 1
+call :build darwin amd64
 exit /b %ERRORLEVEL%
 
 :build
@@ -55,10 +68,11 @@ go build -trimpath -ldflags="-s -w" -o "%DEST%" .
 exit /b %ERRORLEVEL%
 
 :help
-echo usage: %~nx0 [native^|linux^|windows^|all]
+echo usage: %~nx0 [native^|linux^|windows^|macos^|all]
 echo   native   host GOOS/GOARCH (default)
 echo   linux    linux/amd64
 echo   windows  windows/amd64
-echo   all      linux/amd64 and windows/amd64
+echo   macos    darwin/arm64 and darwin/amd64
+echo   all      linux, windows, and macos
 echo OUT=dir overrides the output root (default: dist\)
 exit /b 0
