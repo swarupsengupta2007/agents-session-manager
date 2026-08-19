@@ -29,9 +29,11 @@ native)
 	;;
 linux)
 	build_one linux amd64
+	build_one linux arm64
 	;;
 windows)
 	build_one windows amd64
+	build_one windows arm64
 	;;
 macos|darwin|mac)
 	build_one darwin arm64
@@ -39,17 +41,19 @@ macos|darwin|mac)
 	;;
 all)
 	build_one linux amd64
+	build_one linux arm64
 	build_one windows amd64
+	build_one windows arm64
 	build_one darwin arm64
 	build_one darwin amd64
 	;;
 -h|--help|help)
 	echo "usage: $0 [native|linux|windows|macos|all]"
 	echo "  native   host GOOS/GOARCH (default)"
-	echo "  linux    linux/amd64"
-	echo "  windows  windows/amd64"
+	echo "  linux    linux/amd64 and linux/arm64"
+	echo "  windows  windows/amd64 and windows/arm64"
 	echo "  macos    darwin/arm64 and darwin/amd64"
-	echo "  all      linux, windows, and macos"
+	echo "  all      linux, windows, and macos (amd64 + arm64)"
 	echo "OUT=dir overrides the output root (default: dist/)"
 	exit 0
 	;;

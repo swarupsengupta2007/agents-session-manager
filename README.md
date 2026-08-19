@@ -35,10 +35,10 @@ build with `CGO_ENABLED=0` and can cross-compile.
 ```sh
 # Linux / macOS / Git Bash
 ./build.sh            # host OS/arch → dist/<os>-<arch>/
-./build.sh all        # linux, windows, macos (Intel + Apple Silicon)
-./build.sh linux
-./build.sh windows
-./build.sh macos
+./build.sh all        # linux, windows, macos (amd64 + arm64)
+./build.sh linux      # linux/amd64 and linux/arm64
+./build.sh windows    # windows/amd64 and windows/arm64
+./build.sh macos      # darwin/arm64 and darwin/amd64
 
 # macOS only (same binaries as ./build.sh macos)
 ./build-macos.sh          # darwin/arm64 and darwin/amd64

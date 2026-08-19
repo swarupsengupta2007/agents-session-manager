@@ -33,10 +33,14 @@ exit /b %ERRORLEVEL%
 
 :linux
 call :build linux amd64
+if errorlevel 1 exit /b 1
+call :build linux arm64
 exit /b %ERRORLEVEL%
 
 :windows
 call :build windows amd64
+if errorlevel 1 exit /b 1
+call :build windows arm64
 exit /b %ERRORLEVEL%
 
 :macos
@@ -48,7 +52,11 @@ exit /b %ERRORLEVEL%
 :all
 call :build linux amd64
 if errorlevel 1 exit /b 1
+call :build linux arm64
+if errorlevel 1 exit /b 1
 call :build windows amd64
+if errorlevel 1 exit /b 1
+call :build windows arm64
 if errorlevel 1 exit /b 1
 call :build darwin arm64
 if errorlevel 1 exit /b 1
@@ -70,9 +78,9 @@ exit /b %ERRORLEVEL%
 :help
 echo usage: %~nx0 [native^|linux^|windows^|macos^|all]
 echo   native   host GOOS/GOARCH (default)
-echo   linux    linux/amd64
-echo   windows  windows/amd64
+echo   linux    linux/amd64 and linux/arm64
+echo   windows  windows/amd64 and windows/arm64
 echo   macos    darwin/arm64 and darwin/amd64
-echo   all      linux, windows, and macos
+echo   all      linux, windows, and macos (amd64 + arm64)
 echo OUT=dir overrides the output root (default: dist\)
 exit /b 0
