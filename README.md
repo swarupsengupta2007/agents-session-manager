@@ -27,6 +27,18 @@ them to the new path.
 A session is **orphaned** when the project path recorded in its transcript
 no longer exists on disk.
 
+## Install
+
+Download a binary from
+[Releases](https://github.com/swarupsengupta2007/agents-session-manager/releases):
+Linux, Windows, and macOS, each as amd64 and arm64. Archives are
+`agents-session-manager_<version>_<os>_<arch>.tar.gz` (`.zip` on Windows),
+with `checksums.txt` on the same release.
+
+Pushing a `v*` tag (for example `v0.1.0`) runs tests and
+[GoReleaser](https://goreleaser.com) on GitHub Actions, which publishes
+that release. Local builds still use the scripts below.
+
 ## Build
 
 Requires Go ≥ 1.23. `modernc.org/sqlite` is pure Go, so the scripts
