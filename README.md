@@ -54,14 +54,7 @@ resume command.
 - **Builds and releases** — Linux, Windows, macOS × amd64 and arm64,
   `CGO_ENABLED=0`. GitHub Releases from a `v*` tag via GoReleaser.
 
-## The problem it solves
-
-These agents key their session storage to the project path. Move a project
-from `/path/to/dir1` to `/path/to/dir2` and the transcripts still point at
-the old path: `claude --resume`, `codex resume`, `grok --resume`,
-`agy --conversation`, `qwen --resume` and `muse resume` no longer show
-those sessions. This tool detects such **orphaned** sessions and remaps
-them to the new path.
+## Session storage
 
 | Agent | Storage | Path encoding | What a remap does |
 |---|---|---|---|
