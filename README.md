@@ -39,6 +39,19 @@ Pushing a `v*` tag (for example `v0.1.0`) runs tests and
 [GoReleaser](https://goreleaser.com) on GitHub Actions, which publishes
 that release. Local builds still use the scripts below.
 
+### Release philosophy
+
+Versions follow [semver](https://semver.org/). `main` is development;
+a release is a `v*` tag.
+
+- **v0.1.0** — first public cut
+- **v0.1.1** — bugfix
+- **v0.2.0** — features (export/migrate, rename, extra homes, …)
+
+Patch (`0.1.x`) is for fixes that do not change behavior on purpose.
+Minor (`0.2.0`, `0.3.0`, …) is for user-visible features. Breaking
+changes wait for `1.0.0` or get a minor bump while we are still `0.x`.
+
 ## Build
 
 Requires Go ≥ 1.23. `modernc.org/sqlite` is pure Go, so the scripts
