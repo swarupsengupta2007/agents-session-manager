@@ -1,10 +1,58 @@
 # agents-session-manager
 
-A TUI (Go, Bubble Tea) that lists the chat sessions of every supported
+A TUI (Go, Bubble Tea) and CLI that lists chat sessions of every supported
 agent CLI on a machine — **Claude Code**, **Codex CLI**, **Grok CLI**,
-**Antigravity CLI (`agy`)**, **Qwen Code**, **Muse Code** — and repairs
-sessions whose project folder has moved, so the agents' own resume
-commands find them again.
+**Antigravity CLI (`agy`)**, **Qwen Code**, **Muse Code** — then remaps,
+renames, exports, deletes, and resumes them.
+
+These agents key storage to the project path. Move a folder and
+`claude --resume`, `codex resume`, `grok --resume`, `agy --conversation`,
+`qwen --resume` and `muse resume` no longer show those sessions. This
+tool flags **orphans** (recorded cwd missing on disk) and remaps them
+to the new path. It also copies a transcript from one agent into
+another, changes display titles, and hands off to the agent's own
+resume command.
+
+## Features
+
+- **Unified session list** — one table for all six agents: orphan flag,
+  lock/active marker, last updated, message count, model, project path,
+  title. Extra homes appear as `agent@<basename>` tabs. Orphans sort
+  first. Parallel scan (4 workers per agent).
+- **Filters** — `/` search (title, ID, cwd, model, store), `tab` /
+  `shift+tab` agent tabs, `o` orphans only, `enter`/`d`/`?` detail pane.
+- **Remap** — `m` (or `remap`) rewrites the project path for **every**
+  session of that agent that shares the selected cwd, so the agent's
+  own resume command finds them again. Preview of every action, then
+  `y`.
+- **Rename** — `n` (or `rename --id` / `--name` / `--session`) changes
+  the **display title / session name**. The UUID is never rewritten.
+- **Export / migrate between agents** — `e` then `c` to **export**
+  (copy) or `m` to **migrate** (copy, then archive the source). CLI:
+  `export --from --to [--move]`. The copy gets a new UUID; turns are
+  rewritten into the target's native files. Agy bodies are protobuf, so
+  an export *from* agy is title-only.
+- **Soft delete** — `x` archives artifacts into the backup dir (never
+  `rm`).
+- **Resume handoff** — `r` suspends the TUI and runs the agent's resume
+  command in the session cwd (`CLAUDE_CONFIG_DIR` / `CODEX_HOME` / … set
+  for extra stores). Allowed even while that agent is locked. Orphans
+  must be remapped first.
+- **Extra homes** — Claude, Codex, Grok, Qwen, and Muse can keep
+  sessions outside the default path. TUI `a` on that agent's tab, or
+  `config add-dir` / `--<agent>-dir`. Agy has no relocatable home.
+- **Live locks** — a running writer turns that agent's tab red and
+  shows `LOCKED  PID …` on the selected tab. Remap / rename / delete /
+  export / migrate are refused; resume is not. Re-detected every
+  second (`L` to refresh now). Stale marker PIDs that now belong to
+  another process are ignored.
+- **Safe writes** — preview, backup, copy-modify-swap, lock probes
+  around the swap, then a delta check. A mismatch warns about possible
+  concurrent-writer corruption.
+- **Headless CLI** — `scan`, `remap`, `rename`, `export`, `config`
+  (see below).
+- **Builds and releases** — Linux, Windows, macOS × amd64 and arm64,
+  `CGO_ENABLED=0`. GitHub Releases from a `v*` tag via GoReleaser.
 
 ## The problem it solves
 
@@ -99,20 +147,20 @@ Keys:
 
 | Key | Action |
 |---|---|
-| `↑/↓` (`j/k`), `pgup/pgdn`, `g/G` | navigate |
-| `/` | search titles, IDs, paths, models |
-| `tab` | cycle agent filter (all / claude / codex / grok / agy / qwen / muse) |
+| `↑/↓` (`j/k`), `pgup/pgdn`, `g`/`G` | navigate |
+| `/` | search titles, IDs, paths, models, stores |
+| `tab` / `shift+tab` | next / previous agent tab (all, then each discovered store) |
 | `o` | show orphaned sessions only |
-| `enter` / `d` | session detail pane |
-| `m` | remap: applies to **all** sessions sharing the selected session's project path |
-| `n` | rename the selected session (display title / session name; the GUID stays put) |
-| `e` | export or migrate the selected session to another agent |
-| `x` | delete (soft: artifacts are archived to the backup dir) |
-| `r` | resume handoff: suspends the TUI and runs `claude --resume <id>` / `codex resume <id>` / `grok --resume <id>` / `agy --conversation <id>` / `qwen --resume <id>` / `muse resume <id>` in the session's project dir |
-| `a` | add an extra Claude `CONFIG_DIR` (persisted) |
+| `enter` / `d` / `?` | session detail pane |
+| `m` | remap: **all** sessions sharing the selected session's agent + project path |
+| `n` | rename display title / session name (UUID unchanged) |
+| `e` | export (copy) or migrate (copy + archive source) to another agent |
+| `x` | delete (soft: artifacts archived to the backup dir) |
+| `r` | resume handoff in the session's project dir (see resume commands below) |
+| `a` | add an extra home for the **selected agent tab** (claude/codex/grok/qwen/muse) |
 | `L` | re-detect running agents now (also polled every second) |
 | `R` | rescan |
-| `q` | quit |
+| `q` / `esc` | quit (esc also closes detail, search, and status) |
 
 Remap flow: select an orphaned session → `m` → type the new project path →
 a **preview of every planned action** is shown → `y` applies it.
@@ -125,15 +173,22 @@ Export / migrate: select a session → `e` → `c` to **export** (copy) or
 agent → preview → `y`. The copy gets a new UUID. Turns are converted to
 the target's native transcript so this tool (and the target CLI, when it
 scans the same files) can list them. Agy conversation bodies are
-protobuf, so an export from agy carries the title only.
+protobuf, so an export from agy carries the title only. Export onto the
+same store is a duplicate with a new ID; migrate onto the same store is
+refused.
+
+Resume commands: `claude --resume <id>`, `codex resume <id>`,
+`grok --resume <id>`, `agy --conversation <id>`, `qwen --resume <id>`,
+`muse resume <id>`.
 
 ### Headless
 
 ```sh
-# list everything (also: --json, --orphans)
+# list everything
 ./agents-session-manager scan
+./agents-session-manager scan --json --orphans
 
-# migrate one agent's sessions from an old path to a new one
+# rewrite one agent's sessions from an old project path to a new one
 ./agents-session-manager remap --agent claude --from /path/to/dir1 --to /path/to/dir2 [--yes]
 
 # rename by GUID or by the current session name
@@ -141,20 +196,27 @@ protobuf, so an export from agy carries the title only.
 ./agents-session-manager rename --agent grok --name "Fix the frobnicator" --to "Frobnicator v2"
 ./agents-session-manager rename --agent muse --session "update" --to "Ship it" --yes
 
-# copy a session into another agent (add --move to archive the source)
+# copy a session into another agent (--move archives the source)
 ./agents-session-manager export --from claude --to grok --id 0664494f-279a-4d7d-a398-2c83039d6885 --yes
 ./agents-session-manager export --from qwen --to claude --name "hi from qwen" --move --yes
+
+# extra homes (also: --claude-dir, --codex-dir, --grok-dir, --qwen-dir, --muse-dir)
+./agents-session-manager config list
+./agents-session-manager config add-dir grok /path/to/alt-grok
+./agents-session-manager config rm-dir grok /path/to/alt-grok
 ```
 
-`remap` and `rename` print the plan and ask for confirmation unless `--yes`
-is given. `--session` accepts either a GUID or a title; `--id` / `--name`
-are the same selectors spelled out. A title must match exactly one session
-(case-insensitive). Multiple homes for the same agent need `--store`.
+`remap`, `rename`, and `export` print the plan and ask for confirmation
+unless `--yes` is given. `--session` accepts either a GUID or a title;
+`--id` / `--name` are the same selectors spelled out. A title must match
+exactly one session (case-insensitive). Multiple homes for the same
+agent need `--store` (`remap`/`rename`) or `--from-store` / `--to-store`
+(`export`).
 
 ## Safety model
 
-- **Preview first** — every migration shows the full action list before
-  anything touches disk.
+- **Preview first** — remap, export/migrate, and headless mutating
+  commands show the full action list before anything touches disk.
 - **Backup before every mutation** — originals are copied to
   `~/.agents-session-manager/backups/<timestamp>-<agent>/` (including the
   sqlite index) before the corresponding action runs. Deletes are *moves*
@@ -166,18 +228,18 @@ are the same selectors spelled out. A title must match exactly one session
   `~/.grok/active_sessions.json` (pid still alive), agy conversations
   whose `presence/<id>.lock` is flocked, qwen `.runtime.json` pids that
   are still alive, and muse `.session.lock` files that are flocked are
-  refused by remap/delete/rename.
+  refused by remap/delete/rename/export/migrate.
 - **Running-agent lock** — per agent. If `claude` / `codex` / `grok` /
   `agy` / `qwen` / `muse` is running (process `comm` match, including
   `muse-bin-*` prefix and `qwen-code` on a node cmdline, or a live
   activity marker), that agent's filter tab is red. Selecting the tab
   shows a short `LOCKED  PID …` line for that store only. Remap/delete/
-  rename are refused. Locks are re-detected every second while the TUI
-  is open (and immediately after a scan, apply, resume, or `L`), so an
-  agent that starts or exits after the manager launched is reflected
-  without a restart. Stale marker PIDs that now belong to some other
-  process are ignored. Resume handoff is still allowed. Headless
-  `remap` / `rename` refuse too; `scan` does not.
+  rename/export/migrate are refused. Locks are re-detected every second
+  while the TUI is open (and immediately after a scan, apply, resume, or
+  `L`), so an agent that starts or exits after the manager launched is
+  reflected without a restart. Stale marker PIDs that now belong to some
+  other process are ignored. Resume handoff is still allowed. Headless
+  `remap` / `rename` / `export` refuse too; `scan` does not.
 - **Copy-modify-swap writes** — every in-place mutation is applied to a
   sibling work copy of a snapshot, then swapped over the original. The
   writer probes for a live agent before the snapshot, before the swap,
