@@ -16,8 +16,19 @@ import (
 	"agents-session-manager/internal/model"
 )
 
+func isolateMuseEnv(t *testing.T) {
+	t.Helper()
+	// GitHub Actions and some desktops set XDG_*; NewMuse honors those
+	// over the sandbox home passed into the constructor.
+	t.Setenv("MUSE_HOME", "")
+	t.Setenv("MUSE_CONFIG", "")
+	t.Setenv("XDG_DATA_HOME", "")
+	t.Setenv("XDG_CONFIG_HOME", "")
+}
+
 func seedMuse(t *testing.T, home, cwd, id, title string) string {
 	t.Helper()
+	isolateMuseEnv(t)
 	dir := filepath.Join(home, ".local", "share", "muse", "sessions", "2026", "08", "18", id)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
