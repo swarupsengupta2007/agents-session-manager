@@ -1007,6 +1007,16 @@ func (m Model) startAddStore() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateAddStore(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.picker.confirm != "" {
+		switch key.String() {
+		case "y":
+			return m.saveAddStore(m.picker.confirm)
+		case "esc", "n":
+			m.picker.confirm = ""
+			m.picker.note = ""
+		}
+		return m, nil
+	}
 	var cmd tea.Cmd
 	var res pickerResult
 	m, res, cmd = m.updateDirPicker(key)
@@ -1022,6 +1032,8 @@ func (m Model) updateAddStore(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 }
 
+// submitAddStore checks the chosen directory and asks for confirmation;
+// nothing is saved until saveAddStore.
 func (m Model) submitAddStore(raw string) (tea.Model, tea.Cmd) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -1029,14 +1041,56 @@ func (m Model) submitAddStore(raw string) (tea.Model, tea.Cmd) {
 		m.mode = modeList
 		return m, nil
 	}
-	if _, err := config.AddDir(string(m.addKind), raw); err != nil {
-		m.errMsg = err.Error()
+	dir, err := filepath.Abs(raw)
+	if err != nil {
+		m.errMsg = "invalid path: " + err.Error()
+		return m, nil
+	}
+	dir = filepath.Clean(dir)
+	if st, err := os.Stat(dir); err != nil || !st.IsDir() {
+		m.errMsg = "not a directory: " + dir
+		return m, nil
+	}
+	if m.isKnownHome(m.addKind, dir) {
+		m.errMsg = fmt.Sprintf("%s is already a %s home", dir, m.addKind)
 		return m, nil
 	}
 	m.endPathEdit()
+	m.errMsg = ""
+	m.picker.confirm = dir
+	m.picker.note = ""
+	if !agents.LooksLikeHome(m.addKind, dir) {
+		m.picker.note = fmt.Sprintf("no %s sessions found here; it may not be a %s home", m.addKind, m.addKind)
+	}
+	return m, nil
+}
+
+func (m Model) isKnownHome(k model.Kind, dir string) bool {
+	for _, a := range m.agents {
+		if a.Kind() == k && agents.SamePath(a.Root(), dir) {
+			return true
+		}
+	}
+	if cfg, err := config.Load(); err == nil {
+		for _, d := range cfg.Dirs(string(k)) {
+			if agents.SamePath(d, dir) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (m Model) saveAddStore(dir string) (tea.Model, tea.Cmd) {
+	m.picker.confirm = ""
+	m.picker.note = ""
+	if _, err := config.AddDir(string(m.addKind), dir); err != nil {
+		m.errMsg = err.Error()
+		return m, nil
+	}
 	m.mode = modeList
 	m.agents = agents.DiscoverWith(agents.DiscoverOptions{Extra: m.extraDirs})
-	m.status = fmt.Sprintf("added extra %s home %s", m.addKind, raw)
+	m.status = fmt.Sprintf("added extra %s home %s", m.addKind, dir)
 	m.scanning = true
 	return m, m.scanCmd()
 }

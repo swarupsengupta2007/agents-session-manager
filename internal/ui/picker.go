@@ -24,6 +24,8 @@ type dirPicker struct {
 	editing  bool
 	err      string
 	chosen   string
+	confirm  string // directory awaiting y/esc (add-home only)
+	note     string // warning shown with confirm
 }
 
 type pickerResult int
@@ -369,6 +371,16 @@ func (m Model) renderDirPicker() string {
 	cwd := truncate(m.picker.cwd, textW-len("this dir "))
 	b.WriteString(dimStyle.Render("this dir ") + boldPath(cwd))
 	b.WriteString("\n\n")
+
+	if m.picker.confirm != "" {
+		b.WriteString("Add " + boldPath(truncate(m.picker.confirm, textW-len("Add "))) + "\n")
+		b.WriteString(fmt.Sprintf("as an extra %s home?\n", m.addKind))
+		if m.picker.note != "" {
+			b.WriteString(errStyle.Render(truncate(m.picker.note, textW)) + "\n")
+		}
+		b.WriteString("\n" + dimStyle.Render(truncate("y add · esc back to directories", textW)))
+		return boxStyle.Width(m.pickerBoxWidth()).Render(b.String())
+	}
 
 	page := m.pickerPage()
 	offset := m.picker.offset

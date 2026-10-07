@@ -461,6 +461,9 @@ func (m Model) renderStatus() string {
 func (m Model) footerKeys() string {
 	switch m.mode {
 	case modeRemapInput, modeAddStore:
+		if m.picker.confirm != "" {
+			return "y add · esc back to directories"
+		}
 		if m.picker.editing {
 			return "enter use path · esc back to directories"
 		}

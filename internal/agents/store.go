@@ -19,6 +19,25 @@ func SupportsExtra(k model.Kind) bool {
 	}
 }
 
+// LooksLikeHome reports whether dir has the store layout kind expects, so
+// a caller can warn before saving a folder that is not an agent home.
+func LooksLikeHome(k model.Kind, dir string) bool {
+	switch k {
+	case model.Claude:
+		return newClaude(dir, true).Installed()
+	case model.Codex:
+		return newCodex(dir, true).Installed()
+	case model.Grok:
+		return newGrok(dir, true).Installed()
+	case model.Qwen:
+		return newQwen(dir, true).Installed()
+	case model.Muse:
+		return newMuse(dir, true).Installed()
+	default:
+		return false
+	}
+}
+
 func absClean(p string) string {
 	if a, err := filepath.Abs(p); err == nil {
 		p = a

@@ -387,11 +387,66 @@ func TestAddClaudeDirFlow(t *testing.T) {
 	m = send(t, m, key("/"))
 	m.input.SetValue(dir)
 	m = send(t, m, key("enter"))
+
+	// Choosing only asks; nothing is saved before y.
+	if m.mode != modeAddStore || m.picker.confirm != dir {
+		t.Fatalf("expected confirm, mode=%v confirm=%q err=%q", m.mode, m.picker.confirm, m.errMsg)
+	}
+	view := m.View()
+	if !strings.Contains(view, "as an extra claude home?") || !strings.Contains(view, "may not be a claude home") {
+		t.Fatalf("confirm or warning missing:\n%s", view)
+	}
+	if _, err := os.Stat(cfg); !os.IsNotExist(err) {
+		t.Fatalf("config written before confirm: %v", err)
+	}
+	m = send(t, m, key("esc"))
+	if m.mode != modeAddStore || m.picker.confirm != "" {
+		t.Fatalf("esc should go back to the picker, mode=%v confirm=%q", m.mode, m.picker.confirm)
+	}
+
+	m = send(t, m, key("/"))
+	m.input.SetValue(dir)
+	m = send(t, m, key("enter"))
+	m = send(t, m, key("y"))
 	if m.mode != modeList {
 		t.Fatalf("mode=%v err=%q", m.mode, m.errMsg)
 	}
 	if !strings.Contains(m.status, "added") {
 		t.Fatalf("status=%q", m.status)
+	}
+	b, err := os.ReadFile(cfg)
+	if err != nil || !strings.Contains(string(b), dir) {
+		t.Fatalf("config missing %s: %s %v", dir, b, err)
+	}
+
+	// The same dir again is refused before the confirm step.
+	m.mode = modeList
+	m = send(t, m, key("a"))
+	m = send(t, m, key("/"))
+	m.input.SetValue(dir)
+	m = send(t, m, key("enter"))
+	if m.picker.confirm != "" || !strings.Contains(m.errMsg, "already a claude home") {
+		t.Fatalf("duplicate home not refused, confirm=%q err=%q", m.picker.confirm, m.errMsg)
+	}
+}
+
+func TestAddStoreConfirmNoWarningForRealHome(t *testing.T) {
+	t.Setenv("ASM_CONFIG", filepath.Join(t.TempDir(), "asm.json"))
+	m := fixtureModel(t)
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "projects"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	m = send(t, m, key("tab")) // claude
+	m = send(t, m, key("a"))
+	m = send(t, m, key("/"))
+	m.input.SetValue(dir)
+	m = send(t, m, key("enter"))
+	if m.picker.confirm != dir || m.picker.note != "" {
+		t.Fatalf("confirm=%q note=%q err=%q", m.picker.confirm, m.picker.note, m.errMsg)
+	}
+	if !strings.Contains(m.footerKeys(), "y add") {
+		t.Fatalf("footer=%q", m.footerKeys())
 	}
 }
 
