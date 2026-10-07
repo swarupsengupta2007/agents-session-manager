@@ -20,10 +20,10 @@ longer exists on disk.
 
 ## Current state (2026-10-07)
 
-- **v0.1.0** is tagged and published (GoReleaser on a `v*` tag).
-- Branch `dir-picker` (4 commits on top of `main`, not pushed):
-  e2e test fix, directory picker, add-home confirm, this status update.
-  Candidate for **v0.2.0** (new feature → minor bump).
+- **v0.2.0** (2026-10-07): directory picker for remap/add-home, add-home
+  confirm, `~` expansion, e2e test fix. Released from `main` via
+  GoReleaser on the `v0.2.0` tag.
+- **v0.1.0** (2026-08-19): first public release.
 - All tests pass, including the real-data e2e test.
 
 Open ideas, not started:
