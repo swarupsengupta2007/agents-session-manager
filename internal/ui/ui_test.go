@@ -419,8 +419,10 @@ func TestAddClaudeDirFlow(t *testing.T) {
 		t.Fatalf("config missing %s: %s %v", dir, b, err)
 	}
 
-	// The same dir again is refused before the confirm step.
-	m.mode = modeList
+	// The same dir again is refused before the confirm step. Saving
+	// rediscovered agents from this machine, so start from the fixture again.
+	m = fixtureModel(t)
+	m = send(t, m, key("tab")) // claude
 	m = send(t, m, key("a"))
 	m = send(t, m, key("/"))
 	m.input.SetValue(dir)
