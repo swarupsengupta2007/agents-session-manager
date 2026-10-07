@@ -145,18 +145,24 @@ Keys:
 | `tab` / `shift+tab` | next / previous agent tab (all, then each discovered store) |
 | `o` | show orphaned sessions only |
 | `enter` / `d` / `?` | session detail pane |
-| `m` | remap: **all** sessions sharing the selected session's agent + project path |
+| `m` | remap: **all** sessions sharing the selected session's agent + project path. A directory picker opens for the new path |
 | `n` | rename display title / session name (UUID unchanged) |
 | `e` | export (copy) or migrate (copy + archive source) to another agent |
 | `x` | delete (soft: artifacts archived to the backup dir) |
 | `r` | resume handoff in the session's project dir (see resume commands below) |
-| `a` | add an extra home for the **selected agent tab** (claude/codex/grok/qwen/muse) |
+| `a` | add an extra home for the **selected agent tab** (claude/codex/grok/qwen/muse). Same directory picker as remap |
 | `L` | re-detect running agents now (also polled every second) |
 | `R` | rescan |
 | `q` / `esc` | quit (esc also closes detail, search, and status) |
 
-Remap flow: select an orphaned session → `m` → type the new project path →
-a **preview of every planned action** is shown → `y` applies it.
+Remap flow: select a session → `m` → a directory picker opens over the
+list. Arrow keys move, `enter` opens the highlighted folder, `space`
+selects it, and `←`/`backspace` go up. The `.` row at the top uses the
+folder you are browsing. Every letter filters the list. `/` or `~`
+starts a typed or pasted path; `~` expands to your home, and a relative
+path is resolved against the folder you are browsing. A **preview of
+every planned action** follows → `y` applies it. Adding an extra home
+(`a`) uses the same picker.
 
 Rename flow: select a session → `n` → edit the title (prefilled) → enter
 applies it. Lookup on the CLI is by GUID or by the current title.

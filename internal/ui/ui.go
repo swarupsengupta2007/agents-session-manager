@@ -86,6 +86,7 @@ type Model struct {
 
 	query     string
 	input     textinput.Model
+	picker    dirPicker
 	searching bool
 
 	agentFilter int // 0 = all, n = agents[n-1]
@@ -302,6 +303,12 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+		if m.mode == modeRemapInput || m.mode == modeAddStore {
+			m.pickerEnsureVisible()
+			if m.picker.editing {
+				m.syncPickerInputWidth()
+			}
+		}
 		return m, nil
 
 	case sessionsLoadedMsg:
@@ -553,60 +560,65 @@ func (m Model) startRemap() (tea.Model, tea.Cmd) {
 	m.mode = modeRemapInput
 	m.remapGroup = group
 	m.errMsg = ""
-	m.input.SetValue("")
-	m.input.Placeholder = "/new/path/to/project"
-	m.input.Focus()
-	return m, m.input.Cursor.BlinkCmd()
+	sub := fmt.Sprintf("%d %s session(s) from %s", len(group), group[0].Kind, group[0].Cwd)
+	m = m.openPicker("Remap project path", sub, pickerStart(group[0].Cwd))
+	return m, nil
 }
 
 func (m Model) updateRemapInput(key tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch key.String() {
-	case "esc":
+	var cmd tea.Cmd
+	var res pickerResult
+	m, res, cmd = m.updateDirPicker(key)
+	switch res {
+	case pickerCancel:
+		m.endPathEdit()
 		m.mode = modeList
 		m.remapGroup = nil
-		m.input.Blur()
 		return m, nil
-	case "enter":
-		raw := strings.TrimSpace(m.input.Value())
-		if raw == "" {
-			m.mode = modeList
-			m.remapGroup = nil
-			m.input.Blur()
-			return m, nil
-		}
-		abs, err := filepath.Abs(raw)
-		if err != nil {
-			m.errMsg = "invalid path: " + err.Error()
-			return m, nil
-		}
-		abs = filepath.Clean(abs)
-		oldCwd := m.remapGroup[0].Cwd
-		if abs == filepath.Clean(oldCwd) {
-			m.errMsg = "new path is the same as the old one"
-			return m, nil
-		}
-		agent, ok := m.agentFor(m.remapGroup[0])
-		if !ok {
-			m.errMsg = "no agent adapter for " + string(m.remapGroup[0].Kind)
-			return m, nil
-		}
-		plan, err := agent.RemapPlan(m.remapGroup, abs)
-		if err != nil {
-			m.errMsg = err.Error()
-			return m, nil
-		}
-		if err := plan.Validate(); err != nil {
-			m.errMsg = err.Error()
-			return m, nil
-		}
-		m.remapPlan = plan
-		m.mode = modeRemapPreview
-		m.input.Blur()
+	case pickerChosen:
+		return m.submitRemap(m.picker.chosen)
+	default:
+		return m, cmd
+	}
+}
+
+func (m Model) submitRemap(raw string) (tea.Model, tea.Cmd) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		m.endPathEdit()
+		m.mode = modeList
+		m.remapGroup = nil
 		return m, nil
 	}
-	var cmd tea.Cmd
-	m.input, cmd = m.input.Update(key)
-	return m, cmd
+	abs, err := filepath.Abs(raw)
+	if err != nil {
+		m.errMsg = "invalid path: " + err.Error()
+		return m, nil
+	}
+	abs = filepath.Clean(abs)
+	oldCwd := m.remapGroup[0].Cwd
+	if abs == filepath.Clean(oldCwd) {
+		m.errMsg = "new path is the same as the old one"
+		return m, nil
+	}
+	agent, ok := m.agentFor(m.remapGroup[0])
+	if !ok {
+		m.errMsg = "no agent adapter for " + string(m.remapGroup[0].Kind)
+		return m, nil
+	}
+	plan, err := agent.RemapPlan(m.remapGroup, abs)
+	if err != nil {
+		m.errMsg = err.Error()
+		return m, nil
+	}
+	if err := plan.Validate(); err != nil {
+		m.errMsg = err.Error()
+		return m, nil
+	}
+	m.remapPlan = plan
+	m.mode = modeRemapPreview
+	m.endPathEdit()
+	return m, nil
 }
 
 func (m Model) updateRemapPreview(key tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -989,35 +1001,42 @@ func (m Model) startAddStore() (tea.Model, tea.Cmd) {
 	m.addKind = k
 	m.mode = modeAddStore
 	m.errMsg = ""
-	m.input.SetValue("")
-	m.input.Placeholder = "/path/to/custom/" + string(k) + "-home"
-	m.input.Focus()
-	return m, m.input.Cursor.BlinkCmd()
+	root := m.agents[m.agentFilter-1].Root()
+	m = m.openPicker("Add extra "+string(k)+" home", "", pickerStart(root))
+	return m, nil
 }
 
 func (m Model) updateAddStore(key tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch key.String() {
-	case "esc":
-		m.mode = modeList
-		m.input.Blur()
-		return m, nil
-	case "enter":
-		raw := strings.TrimSpace(m.input.Value())
-		m.input.Blur()
-		m.mode = modeList
-		if raw == "" {
-			return m, nil
-		}
-		if _, err := config.AddDir(string(m.addKind), raw); err != nil {
-			m.errMsg = err.Error()
-			return m, nil
-		}
-		m.agents = agents.DiscoverWith(agents.DiscoverOptions{Extra: m.extraDirs})
-		m.status = fmt.Sprintf("added extra %s home %s", m.addKind, raw)
-		m.scanning = true
-		return m, m.scanCmd()
-	}
 	var cmd tea.Cmd
-	m.input, cmd = m.input.Update(key)
-	return m, cmd
+	var res pickerResult
+	m, res, cmd = m.updateDirPicker(key)
+	switch res {
+	case pickerCancel:
+		m.endPathEdit()
+		m.mode = modeList
+		return m, nil
+	case pickerChosen:
+		return m.submitAddStore(m.picker.chosen)
+	default:
+		return m, cmd
+	}
+}
+
+func (m Model) submitAddStore(raw string) (tea.Model, tea.Cmd) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		m.endPathEdit()
+		m.mode = modeList
+		return m, nil
+	}
+	if _, err := config.AddDir(string(m.addKind), raw); err != nil {
+		m.errMsg = err.Error()
+		return m, nil
+	}
+	m.endPathEdit()
+	m.mode = modeList
+	m.agents = agents.DiscoverWith(agents.DiscoverOptions{Extra: m.extraDirs})
+	m.status = fmt.Sprintf("added extra %s home %s", m.addKind, raw)
+	m.scanning = true
+	return m, m.scanCmd()
 }

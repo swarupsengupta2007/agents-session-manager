@@ -62,7 +62,11 @@ func (m Model) View() string {
 	b.WriteString(m.renderStatus())
 	b.WriteString("\n")
 	b.WriteString(m.renderFooter())
-	return b.String()
+	screen := b.String()
+	if m.mode == modeRemapInput || m.mode == modeAddStore {
+		return placeOverlay(screen, m.renderDirPicker(), m.width, m.height)
+	}
+	return screen
 }
 
 func (m Model) renderHeader() string {
@@ -415,10 +419,19 @@ func (m Model) renderStatus() string {
 		return fmt.Sprintf("Rename %s %s — enter new name, enter to save, esc to cancel:",
 			s.Kind, truncate(cur, 40))
 	case m.mode == modeAddStore:
-		return fmt.Sprintf("Add extra %s home — enter path, enter to save, esc to cancel:", m.addKind)
+		if m.errMsg != "" {
+			return errStyle.Render("✗ " + truncate(m.errMsg, m.width))
+		}
+		return fmt.Sprintf("Add extra %s home — choose a directory", m.addKind)
 	case m.mode == modeRemapInput:
+		if m.errMsg != "" {
+			return errStyle.Render("✗ " + truncate(m.errMsg, m.width))
+		}
+		if len(m.remapGroup) == 0 {
+			return "Remap — choose a directory"
+		}
 		s := m.remapGroup[0]
-		return fmt.Sprintf("Remap %d %s session(s) from %s — enter new project path, enter to confirm, esc to cancel:",
+		return fmt.Sprintf("Remap %d %s session(s) from %s",
 			len(m.remapGroup), s.Kind, boldPath(s.Cwd))
 	case m.mode == modeRemapPreview:
 		return fmt.Sprintf("Remap %s → %s — %d actions. %s to apply, %s to cancel.",
@@ -447,14 +460,15 @@ func (m Model) renderStatus() string {
 
 func (m Model) footerKeys() string {
 	switch m.mode {
-	case modeRemapInput:
-		return "enter confirm · esc cancel"
+	case modeRemapInput, modeAddStore:
+		if m.picker.editing {
+			return "enter use path · esc back to directories"
+		}
+		return "↑/↓ move · enter open · space select · ←/backspace up · . row uses this directory · type to filter · / or ~ type a path · esc cancel"
 	case modeRemapPreview:
 		return "y apply · esc cancel"
 	case modeDeleteConfirm:
 		return "y delete · esc cancel"
-	case modeAddStore:
-		return "enter save · esc cancel"
 	case modeRenameInput:
 		return "enter save · esc cancel"
 	case modeTransferPick:

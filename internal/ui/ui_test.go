@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -28,6 +29,10 @@ func key(s string) tea.KeyMsg {
 		return tea.KeyMsg{Type: tea.KeyUp}
 	case "down":
 		return tea.KeyMsg{Type: tea.KeyDown}
+	case "left":
+		return tea.KeyMsg{Type: tea.KeyLeft}
+	case "home":
+		return tea.KeyMsg{Type: tea.KeyHome}
 	default:
 		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
 	}
@@ -124,8 +129,15 @@ func TestRemapFlow(t *testing.T) {
 		t.Fatalf("remap group should cover both /gone/project sessions, got %d", len(m.remapGroup))
 	}
 
-	// Type one rune through the input wiring, then set the value directly.
+	if !strings.Contains(m.View(), "Remap project path") || !strings.Contains(m.View(), "agents-session-manager") {
+		t.Fatalf("directory picker overlay missing:\n%s", m.View())
+	}
+
+	// "/" edits a path. Set the value directly, then confirm.
 	m = send(t, m, key("/"))
+	if !m.picker.editing {
+		t.Fatal("expected path editing")
+	}
 	m.input.SetValue(target)
 	m = send(t, m, key("enter"))
 	if m.mode != modeRemapPreview {
@@ -154,10 +166,14 @@ func TestRemapFlow(t *testing.T) {
 func TestRemapRejectsSamePath(t *testing.T) {
 	m := fixtureModel(t)
 	m = send(t, m, key("m"))
+	m = send(t, m, key("/"))
 	m.input.SetValue("/gone/project")
 	m = send(t, m, key("enter"))
 	if m.mode != modeRemapInput || m.errMsg == "" {
 		t.Fatalf("expected error for same path, mode=%v err=%q", m.mode, m.errMsg)
+	}
+	if !strings.Contains(m.View(), "same as the old one") {
+		t.Fatalf("error not shown:\n%s", m.View())
 	}
 }
 
@@ -365,6 +381,10 @@ func TestAddClaudeDirFlow(t *testing.T) {
 	if m.mode != modeAddStore {
 		t.Fatalf("mode=%v err=%q", m.mode, m.errMsg)
 	}
+	if !strings.Contains(m.View(), "Add extra claude home") {
+		t.Fatalf("directory picker missing:\n%s", m.View())
+	}
+	m = send(t, m, key("/"))
 	m.input.SetValue(dir)
 	m = send(t, m, key("enter"))
 	if m.mode != modeList {
@@ -468,5 +488,265 @@ func TestViewRendersAllModes(t *testing.T) {
 				t.Fatalf("header missing:\n%s", v)
 			}
 		})
+	}
+}
+
+func TestDirPickerBrowseFilterAndSelect(t *testing.T) {
+	root := t.TempDir()
+	pick := filepath.Join(root, "pickme")
+	skip := filepath.Join(root, "skipme")
+	if err := os.Mkdir(pick, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(skip, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	m := fixtureModel(t)
+	m = send(t, m, key("m"))
+	view := m.View()
+	if strings.Index(view, "agents-session-manager") < 0 || strings.Index(view, "agents-session-manager") > strings.Index(view, "Remap project path") {
+		t.Fatalf("picker should overlay under the header:\n%s", view)
+	}
+	if !strings.Contains(view, "/gone/project") {
+		t.Fatalf("remap source missing from picker:\n%s", view)
+	}
+
+	m.picker.cwd = root
+	m.loadPickerDir()
+	view = m.View()
+	if !strings.Contains(view, "pickme") || !strings.Contains(view, "skipme") {
+		t.Fatalf("directories missing:\n%s", view)
+	}
+
+	m = send(t, m, key("p"))
+	m = send(t, m, key("i"))
+	view = m.View()
+	if !strings.Contains(view, "pickme") || strings.Contains(view, "skipme") {
+		t.Fatalf("filter failed:\n%s", view)
+	}
+	if m.picker.cursor >= len(m.picker.entries) || m.picker.entries[m.picker.cursor] != "pickme" {
+		t.Fatalf("cursor %+v entries %+v", m.picker.cursor, m.picker.entries)
+	}
+
+	// esc clears the filter before it cancels the picker.
+	m = send(t, m, key("esc"))
+	if m.mode != modeRemapInput || m.picker.filter != "" {
+		t.Fatalf("filter clear: mode=%v filter=%q", m.mode, m.picker.filter)
+	}
+	if !strings.Contains(m.View(), "skipme") {
+		t.Fatal("cleared filter should show every directory")
+	}
+
+	m = send(t, m, key("p"))
+	m = send(t, m, key("i"))
+	m = send(t, m, key(" "))
+	if m.mode != modeRemapPreview {
+		t.Fatalf("space select: mode=%v err=%q", m.mode, m.errMsg)
+	}
+	if m.remapPlan == nil || m.remapPlan.NewCwd != pick {
+		t.Fatalf("plan %+v", m.remapPlan)
+	}
+}
+
+func TestDirPickerOpenAndUseThisDir(t *testing.T) {
+	root := t.TempDir()
+	sub := filepath.Join(root, "sub")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	m := fixtureModel(t)
+	m = send(t, m, key("m"))
+	m.picker.cwd = root
+	m.loadPickerDir()
+
+	moved := false
+	for i := 0; i < len(m.picker.entries)+1; i++ {
+		if m.picker.entries[m.picker.cursor] == "sub" {
+			moved = true
+			break
+		}
+		m = send(t, m, key("down"))
+	}
+	if !moved {
+		t.Fatalf("sub not in %+v", m.picker.entries)
+	}
+	m = send(t, m, key("enter"))
+	if m.picker.cwd != sub {
+		t.Fatalf("enter should open sub, cwd=%s", m.picker.cwd)
+	}
+	m = send(t, m, key("left"))
+	if m.picker.cwd != root {
+		t.Fatalf("left should go up, cwd=%s", m.picker.cwd)
+	}
+
+	m.picker.cwd = sub
+	m.loadPickerDir()
+	if m.picker.entries[0] != "." {
+		t.Fatalf("expected a . row first: %+v", m.picker.entries)
+	}
+	m = send(t, m, key("home"))
+	m = send(t, m, key("enter"))
+	if m.mode != modeRemapPreview || m.remapPlan == nil || m.remapPlan.NewCwd != sub {
+		t.Fatalf(". row should use this dir, mode=%v plan=%+v err=%q", m.mode, m.remapPlan, m.errMsg)
+	}
+}
+
+func TestDirPickerPathEditEscape(t *testing.T) {
+	m := fixtureModel(t)
+	m = send(t, m, key("m"))
+	m = send(t, m, key("/"))
+	if !m.picker.editing || !strings.Contains(m.View(), "path:") {
+		t.Fatalf("path edit missing, editing=%v\n%s", m.picker.editing, m.View())
+	}
+	m = send(t, m, key("esc"))
+	if m.mode != modeRemapInput || m.picker.editing {
+		t.Fatalf("esc should return to the list, mode=%v editing=%v", m.mode, m.picker.editing)
+	}
+	m = send(t, m, key("esc"))
+	if m.mode != modeList || m.remapGroup != nil {
+		t.Fatalf("second esc should cancel, mode=%v", m.mode)
+	}
+}
+
+func TestDirPickerFitsWidth(t *testing.T) {
+	m := fixtureModel(t)
+	m = send(t, m, tea.WindowSizeMsg{Width: 48, Height: 20})
+	m = send(t, m, key("m"))
+	m = send(t, m, key("/"))
+	modal := m.renderDirPicker()
+	for _, line := range strings.Split(modal, "\n") {
+		if w := lipgloss.Width(line); w > 48 {
+			t.Fatalf("picker line wider than terminal (%d): %q", w, line)
+		}
+	}
+	if !strings.Contains(m.View(), "use path") || !strings.Contains(m.View(), "agents-session-manager") {
+		t.Fatalf("narrow picker clipped the hint or header:\n%s", m.View())
+	}
+}
+
+func TestPickerStartAndReadSubdirs(t *testing.T) {
+	root := t.TempDir()
+	sub := filepath.Join(root, "sub")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "file.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "linkdir")
+	if err := os.Symlink(sub, link); err != nil {
+		t.Fatal(err)
+	}
+	if pickerStart(sub) != root {
+		t.Fatalf("pickerStart(existing) = %s", pickerStart(sub))
+	}
+	missing := filepath.Join(root, "nope", "child")
+	if nearestExistingDir(missing) != root {
+		t.Fatalf("nearest = %s", nearestExistingDir(missing))
+	}
+	names, err := readSubdirs(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Join(names, ",")
+	if got != "..,linkdir,sub" {
+		t.Fatalf("names = %s", got)
+	}
+
+	// A path whose entire prefix is gone should not dump the user at `/`.
+	orphan := pickerStart("/no/such/agents-session-manager-path")
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if orphan != home {
+		t.Fatalf("orphan start = %s, want home %s", orphan, home)
+	}
+}
+
+func TestDirPickerLettersAlwaysFilter(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"my-project", "jk-tools", "other", "yarn"} {
+		if err := os.Mkdir(filepath.Join(root, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	m := fixtureModel(t)
+	m = send(t, m, key("m"))
+	m.picker.cwd = root
+	m.loadPickerDir()
+
+	// Former shortcut letters start and extend a filter like any other.
+	for _, tc := range []struct{ typed, want string }{
+		{"ya", "yarn"},
+		{"jk", "jk-tools"},
+		{"my", "my-project"},
+		{"h", "other"},
+	} {
+		for _, r := range tc.typed {
+			m = send(t, m, key(string(r)))
+		}
+		if m.mode != modeRemapInput || m.picker.filter != tc.typed || m.picker.cwd != root {
+			t.Fatalf("%q: mode=%v filter=%q cwd=%s", tc.typed, m.mode, m.picker.filter, m.picker.cwd)
+		}
+		if got := m.picker.entries[m.picker.cursor]; got != tc.want {
+			t.Fatalf("%q: cursor on %q, want %q", tc.typed, got, tc.want)
+		}
+		m = send(t, m, key("esc"))
+	}
+	if m.mode != modeRemapInput {
+		t.Fatalf("esc should only clear the filter, mode=%v", m.mode)
+	}
+}
+
+func TestResolvePickerPath(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := t.TempDir()
+	for _, tc := range []struct{ raw, want string }{
+		{"~", home},
+		{"~/proj/x", filepath.Join(home, "proj", "x")},
+		{"rel/dir", filepath.Join(base, "rel", "dir")},
+		{"/abs/../abs/p", "/abs/p"},
+	} {
+		got, err := resolvePickerPath(tc.raw, base)
+		if err != nil || got != tc.want {
+			t.Fatalf("%q: got %q err=%v, want %q", tc.raw, got, err, tc.want)
+		}
+	}
+	if _, err := resolvePickerPath("~bob/x", base); err == nil {
+		t.Fatal("~user should be rejected")
+	}
+}
+
+func TestDirPickerTildePathEdit(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	target := filepath.Join(home, "newproj")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	m := fixtureModel(t)
+	m = send(t, m, key("m"))
+	m = send(t, m, key("~"))
+	if !m.picker.editing || m.input.Value() != "~" {
+		t.Fatalf("~ should start a path, editing=%v value=%q", m.picker.editing, m.input.Value())
+	}
+	m.input.SetValue("~/newproj")
+	m = send(t, m, key("enter"))
+	if m.mode != modeRemapPreview || m.remapPlan == nil || m.remapPlan.NewCwd != target {
+		t.Fatalf("~ not expanded, mode=%v plan=%+v err=%q", m.mode, m.remapPlan, m.errMsg)
+	}
+
+	m = fixtureModel(t)
+	m = send(t, m, key("m"))
+	m = send(t, m, key("~"))
+	m.input.SetValue("~bob/x")
+	m = send(t, m, key("enter"))
+	if m.mode != modeRemapInput || !strings.Contains(m.View(), "~user") {
+		t.Fatalf("~user should be refused in the picker, mode=%v\n%s", m.mode, m.View())
 	}
 }
