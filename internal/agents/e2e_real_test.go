@@ -145,14 +145,20 @@ func TestEndToEndRealDataCopy(t *testing.T) {
 	}
 
 	// Grok: rename the encoded project dir, rewrite summary.json, update sqlite.
+	// The copied active_sessions.json names host pids that never touch the
+	// sandbox; left in place they would block the remap.
 	grokSessions := filepath.Join(grokRoot, "sessions")
-	if err := os.Rename(filepath.Join(grokSessions, url.PathEscape("/root")),
+	if err := os.WriteFile(filepath.Join(grokRoot, "active_sessions.json"), []byte("[]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	grokSrc := grokSourceCwd(t, grokSessions)
+	if err := os.Rename(filepath.Join(grokSessions, url.PathEscape(grokSrc)),
 		filepath.Join(grokSessions, url.PathEscape(oldCwd))); err != nil {
 		t.Fatalf("grok dir rename: %v", err)
 	}
 	filepath.WalkDir(grokSessions, func(p string, d os.DirEntry, err error) error {
 		if err == nil && !d.IsDir() && d.Name() == "summary.json" {
-			if err := migrate.RewriteCwdInFile(p, "/root", oldCwd); err != nil {
+			if err := migrate.RewriteCwdInFile(p, grokSrc, oldCwd); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -162,7 +168,7 @@ func TestEndToEndRealDataCopy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`UPDATE session_docs SET cwd = ? WHERE cwd = ?`, oldCwd, "/root"); err != nil {
+	if _, err := db.Exec(`UPDATE session_docs SET cwd = ? WHERE cwd = ?`, oldCwd, grokSrc); err != nil {
 		t.Fatal(err)
 	}
 	db.Close()
@@ -380,6 +386,47 @@ func TestEndToEndRealDataCopy(t *testing.T) {
 			t.Fatalf("no backup dir for %s under %s", name, backupRoot)
 		}
 	}
+}
+
+// grokSourceCwd picks the grok project to "move": /root when it has sessions,
+// else the project with the most sessions. Real grok data drifts as projects
+// come and go, so the test cannot assume any one path.
+func grokSourceCwd(t *testing.T, sessionsDir string) string {
+	t.Helper()
+	entries, err := os.ReadDir(sessionsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	best, bestN := "", 0
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		subs, err := os.ReadDir(filepath.Join(sessionsDir, e.Name()))
+		if err != nil {
+			continue
+		}
+		n := 0
+		for _, s := range subs {
+			if s.IsDir() {
+				n++
+			}
+		}
+		if n == 0 {
+			continue
+		}
+		cwd := decodeDir(e.Name())
+		if cwd == "/root" {
+			return cwd
+		}
+		if n > bestN {
+			best, bestN = cwd, n
+		}
+	}
+	if best == "" {
+		t.Skip("no grok sessions on this machine")
+	}
+	return best
 }
 
 // simulateAgyFolderMove rewrites sandbox agy records that pointed at /root
