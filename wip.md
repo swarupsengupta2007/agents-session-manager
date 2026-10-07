@@ -1,6 +1,6 @@
 # agents-session-manager — work in progress
 
-Status doc. Last updated: 2026-08-18.
+Status doc. Last updated: 2026-10-07.
 
 ## What this is
 
@@ -12,9 +12,66 @@ agents' own resume commands find them again.
 - Codex CLI: `codex resume <id>`
 - Grok CLI: `grok --resume <id>`
 - Google Antigravity CLI (`agy`): `agy --conversation <id>`
+- Qwen Code: `qwen --resume <id>`
+- Muse Code: `muse resume <id>`
 
 A session is **orphaned** when the project path recorded in its transcript no
 longer exists on disk.
+
+## Current state (2026-10-07)
+
+- **v0.1.0** is tagged and published (GoReleaser on a `v*` tag).
+- Branch `dir-picker` (4 commits on top of `main`, not pushed):
+  e2e test fix, directory picker, add-home confirm, this status update.
+  Candidate for **v0.2.0** (new feature → minor bump).
+- All tests pass, including the real-data e2e test.
+
+Open ideas, not started:
+- `~` is expanded in the TUI path field only; CLI flags rely on the shell.
+- TUI still untested on a real Mac.
+
+## Done — directory picker (2026-10-07)
+
+`m` (remap) and `a` (add extra home) open a modal directory browser over
+the list instead of a bare text input (`internal/ui/picker.go`).
+
+- Starts at the parent of the current path so that folder is visible.
+  A missing path opens at its nearest existing ancestor, or at `$HOME`
+  when only `/` is left.
+- Keys: arrows / pgup / pgdn / home / end move; enter or → opens; space
+  selects; ← or backspace (empty filter) goes up; esc clears the filter,
+  then cancels. A `.` row ("use this directory") chooses the folder
+  being browsed. The cursor starts on the first real folder so enter
+  opens rather than chooses.
+- **Every letter filters** (confirmed with user). The earlier vim keys
+  (j/k/h/l/g/G) and `y` = use this dir were dropped because they made
+  some filters impossible to type, and `y` mid-filter silently chose
+  the current folder.
+- `/`, `\` or `~` starts a typed/pasted path. `~` and `~/…` expand to
+  `$HOME`; `~user` is refused; relative paths resolve against the
+  browsed folder, not the process cwd.
+- Add-home asks "Add <dir> as an extra <agent> home?" and saves only on
+  `y` (esc returns to the browser). It warns when the folder lacks the
+  agent's store dir (`agents.LooksLikeHome`) and refuses a folder that
+  is already a home of that agent (discovered root or config entry).
+  Before this, one stray `y` saved whatever folder was being browsed.
+- Overlay keeps the header row visible and fits narrow terminals.
+
+## Done — export / migrate, rename, releases (2026-08-19, v0.1.0)
+
+- **Rename** (`n`, `rename` CLI): changes display title / session name,
+  never the UUID.
+- **Export / migrate** (`e` → `c`/`m`, `export --from --to [--move]`):
+  copies a session into another agent's store with a new UUID, turns
+  rewritten into the target's native format; migrate archives the source.
+  Agy bodies are protobuf, so export *from* agy is title-only.
+- **Builds**: linux / windows / darwin × amd64 / arm64, `CGO_ENABLED=0`;
+  `build.sh`, `build.cmd`, `build-macos.sh`.
+- **Releases**: CI tests every push to `main`; a `v*` tag runs tests and
+  publishes archives + checksums via GoReleaser. Semver: patches are
+  bugfixes, minors are features.
+- Lock re-detection is now every second (`L` refreshes immediately);
+  older notes below that say 2s are historical.
 
 ## Done — v1 (claude / codex / grok)
 
@@ -63,7 +120,8 @@ Extra per-agent artifacts that must move with the project:
 - Filters: `/` text search (title/id/cwd/model), `tab` agent filter, `o`
   orphans-only. Detail pane (`enter`/`d`).
 - Remap: `m` on any session remaps the whole project group (all sessions
-  sharing its Kind+Cwd) → path input → preview → `y`.
+  sharing its Kind+Cwd) → directory picker (was a path input until
+  2026-10-07) → preview → `y`.
 - Delete: `x` → confirm → archived to backup dir.
 - Resume handoff: `r` suspends the TUI via `tea.ExecProcess` and runs the
   agent's resume command with `Dir` = session cwd; TUI returns on exit and
@@ -83,7 +141,10 @@ Extra per-agent artifacts that must move with the project:
   (via env overrides), simulates a folder move, remaps all three agents
   through the production code paths, verifies sessions come back healthy,
   sidecar/memory/prompt-history moved, sqlite rows updated, old dirs removed,
-  backups present. Skips on machines without agent data.
+  backups present. Skips on machines without agent data. The grok part
+  "moves" `/root` when it has sessions, else the grok project with the
+  most sessions (real data drifts), and clears the sandbox copy of
+  `active_sessions.json` so host grok pids cannot block the remap.
 - Headless `remap` CLI exercised on a sandboxed copy of real Claude data
   (6 sessions migrated, `-root` dir fully removed, mtimes preserved).
 - TUI smoke-tested on a real pty (`script` with stty 140x40): renders header
@@ -92,11 +153,13 @@ Extra per-agent artifacts that must move with the project:
 ### Layout
 
 ```
-main.go                     # TUI entry + scan/remap headless subcommands
+main.go                     # TUI entry + scan/remap/rename/export/config subcommands
 internal/model/             # Session type
-internal/agents/            # claude.go codex.go grok.go agy.go qwen.go muse.go + guard.go/proc.go
+internal/agents/            # claude.go codex.go grok.go agy.go qwen.go muse.go + guard.go/proc*.go
+                            # xfer*.go (export/migrate), store.go (extra-home helpers)
+internal/config/            # extra-home settings file (~/.agents-session-manager/config.json)
 internal/migrate/           # Plan/Action types + Apply engine (backup+execute)
-internal/ui/                # Bubble Tea model (ui.go) + rendering (view.go)
+internal/ui/                # Bubble Tea model (ui.go), rendering (view.go), dir picker (picker.go)
 ```
 
 Binary: `./agents-session-manager` (no args = TUI).
